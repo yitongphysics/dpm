@@ -130,6 +130,7 @@ tumor2D::tumor2D(string &inputFileStr,int seed) : dpm(2) {
 
 	pinpos.resize(NDIM * (NCELLS - tN));
 	pinattach.resize(NCELLS - tN);
+    ifbroken.resize(NCELLS - tN);
 
 	// initialize NVTOT to 0
 	NVTOT = 0;
@@ -572,6 +573,7 @@ void tumor2D::initializeTumorInterface(double aCalA0, double tCalA0, double aDis
 
 	pinpos.resize(NDIM * (NCELLS - tN));
 	pinattach.resize(NCELLS - tN);
+    ifbroken.resize(NCELLS - tN);
 
 	// initialize number of vertices on each cell
 	nv.at(0) = tNV;
@@ -1036,292 +1038,19 @@ void tumor2D::psiVicsek(){
 	}
 }
 
-// update psi, find nearest gap between cells
-void tumor2D::psiGap(double dPsi){
-    //define local variables
-    vector<int> cell_contact;
-    vector<double> contact_direction;
-    vector<double> sort_direction;
-    vector<int> sort_list;
-    vector<int> gap_type;
-    double rix, riy, cxtmp, cytmp, cxi, cyi, r1, min_distance_1, min_distance_2, min_distance_sum;
-    double dx,dy, distmp, diff_psi, psitmp;
-    int i, j, k, vi, gk, ci, cj, ck, NC_contact, min_k;
-    //cell_contact = [ci]; contact_direction = [direction];
-    //sort_direction = sorted direction.
-    //sort_list = [ci], sorted.
-    //gap_type = [0,1,2], between j and j+1.
-    
-    //loop over tumor cells
-    for (ci=0; ci<tN; ci++){
-        com2D(ci,cxi,cyi);
-        cell_contact.resize(100);
-        contact_direction.resize(100);
-        fill(cell_contact.begin(), cell_contact.end(), 0);
-        fill(contact_direction.begin(), contact_direction.end(), 0);
-        
-        sort_direction.resize(0);
-        sort_list.resize(0);
-        gap_type.resize(0);
-        //find cells in contact with tumor cell i
-        k = 0;
-        for (cj=0; cj<NCELLS; cj++){
-            if (cj < ci) {
-                if (cij[NCELLS*cj + ci - (cj+1)*(cj+2)/2]) {
-                    
-                    com2D(cj,cxtmp,cytmp);
-                    
-                    rix = cxtmp - cxi;
-                    if (pbc[0])
-                        rix -= L[0]*round(rix/L[0]);
-                    riy = cytmp - cyi;
-                    if (pbc[1])
-                        riy -= L[1]*round(riy/L[1]);
-                    
-                    cell_contact[k] =cj;
-                    contact_direction[k] = atan2(riy,rix);
-                    k ++;
-                }
-            }
-            else if (cj > ci){
-                if (cij[NCELLS*ci + cj - (ci+1)*(ci+2)/2]) {
-                    
-                    com2D(cj,cxtmp,cytmp);
-                    
-                    rix = cxtmp - cxi;
-                    if (pbc[0])
-                        rix -= L[0]*round(rix/L[0]);
-                    riy = cytmp - cyi;
-                    if (pbc[1])
-                        riy -= L[1]*round(riy/L[1]);
-                    
-                    cell_contact[k] =cj;
-                    contact_direction[k] = atan2(riy,rix);
-                    k ++;
-                }
-            }
-        }
-        NC_contact = k;
-        cell_contact.resize(k);
-        contact_direction.resize(k);
-             
-        if (NC_contact > 0) {
-            //rearange vectors
-            sort_list.resize(NC_contact);
-            gap_type.resize(NC_contact);
-            sort_direction.resize(NC_contact);
-            fill(sort_list.begin(), sort_list.end(), 0);
-            fill(gap_type.begin(), gap_type.end(), 0);
-            fill(sort_direction.begin(), sort_direction.end(), 0);
 
-            //sort out on direction
-            //sort_direction is the sorted direction, from -pi to pi
-            //sort_list is the sorted list, corresponding to sort_direction
-            sort_direction = contact_direction;
-            sort (sort_direction.begin(), sort_direction.end());
-            for (j=0; j<NC_contact; j++){
-                for (k=0; k<NC_contact; k++){
-                    if (contact_direction[k] == sort_direction[j]) {
-                        sort_list[j] = cell_contact[k];
-                    }
-                }
-            }
-            
-            // give gap type: 0,1,2
-            if (sort_list[0] >= tN) {
-                gap_type[0] = gap_type[0] + 1;
-                gap_type[NC_contact - 1] = gap_type[NC_contact - 1] + 1;
-            }
-            for (j=1; j<NC_contact; j++){
-                if (sort_list[j] >= tN) {
-                    gap_type[j] = gap_type[j] + 1;
-                    gap_type[j - 1] = gap_type[j - 1] + 1;
-                }
-            }
-            
-            //if gap type is 2, go nearest
-            if (find(gap_type.begin(), gap_type.end(),2) != gap_type.end()) {
-                                
-                //find minimum of distance from gap to com of ci: dis = dis1 + dis2;
-                min_distance_sum = 100;
-                min_distance_1 = 100;
-                min_distance_2 = 100;
-                min_k = 0;
-                
-                //loop over gap and find type 2
-                for (k=0; k<NC_contact; k++){
-                    if (gap_type[k] == 2) {
-                        //find minimum of distance of vertex on cell k
-                        ck = sort_list[k];
-                        gk = szList.at(ck);
-                        for(vi=0; vi<nv[ck]; vi++){
-                            
-                            dx = x[NDIM * (gk + vi)] - cxi;
-                            dy = x[NDIM * (gk + vi) + 1] - cyi;
-                            if (pbc[0])
-                                dx -= L[0] * round(dx / L[0]);
-                            if (pbc[1])
-                                dy -= L[1] * round(dy / L[1]);
-                            distmp = sqrt(dx*dx + dy*dy);
-                            
-                            if(distmp<min_distance_1){
-                                min_distance_1 = distmp;
-                            }
-                        }
-                        
-                        
-                        //find minimum of distance of vertex on cell k+1
-                        if (k == NC_contact) {
-                            ck = sort_list[0];
-                        }
-                        else {
-                            ck = sort_list[k+1];
-                        }
-                        
-                        gk = szList.at(ck);
-                        for(vi=0; vi<nv[ck]; vi++){
-                            
-                            dx = x[NDIM * (gk + vi)] - cxi;
-                            dy = x[NDIM * (gk + vi) + 1] - cyi;
-                            
-                            if (pbc[0])
-                                dx -= L[0] * round(dx / L[0]);
-                            if (pbc[1])
-                                dy -= L[1] * round(dy / L[1]);
-                            distmp = sqrt(dx*dx + dy*dy);
-                            
-                            if(distmp<min_distance_2){
-                                min_distance_2 = distmp;
-                            }
-                        }
-                        //find minimum of distance of gap
-                        if(min_distance_1 + min_distance_2 < min_distance_sum){
-                            min_distance_sum = min_distance_1 + min_distance_2;
-                            min_k = k;
-                        }
-                    }
-                }
-                k = min_k;
-                if (k == NC_contact) {
-                    psitmp = atan2(sin(sort_direction[k])+sin(sort_direction[0]),cos(sort_direction[k])+cos(sort_direction[0]));
-                }
-                else {
-                    psitmp = atan2(sin(sort_direction[k])+sin(sort_direction[k+1]),cos(sort_direction[k])+cos(sort_direction[k+1]));
-                }
-                
-                diff_psi = psi[ci] - psitmp;
-                diff_psi -= 2.0*PI*round(diff_psi/(2.0*PI));
-                psi[ci] -= diff_psi * dPsi;
-            }
-
-            //else if gap type is 1
-            else if (find(gap_type.begin(), gap_type.end(),1) != gap_type.end()){
-
-                min_distance_1 = 100;
-                min_distance_2 = 100;
-                min_k = 0;
-                
-                //find nearest adipocyte cell
-                for (k=0; k<NC_contact; k++){
-                    ck = sort_list[k];
-                    if (ck > tN) {
-                        gk = szList.at(ck);
-                        for(vi=0; vi<nv[ck]; vi++){
-                            
-                            dx = x[NDIM * (gk + vi)] - cxi;
-                            dy = x[NDIM * (gk + vi) + 1] - cyi;
-                            if (pbc[0])
-                                dx -= L[0] * round(dx / L[0]);
-                            if (pbc[1])
-                                dy -= L[1] * round(dy / L[1]);
-                            distmp = sqrt(dx*dx + dy*dy);
-                            
-                            if(distmp<min_distance_1){
-                                min_distance_1 = distmp;
-                                min_k = k;
-                            }
-                        }
-                    }
-                }
-                
-                //between the two tumor cells on two sides of the nearest adipocyte
-                //find the nearer one
-                min_distance_1=100;
-                min_distance_2=100;
-                
-                //k = min_k+1
-                if (min_k == NC_contact) {
-                    ck = sort_list[0];
-                }
-                else {
-                    ck = sort_list[min_k+1];
-                }
-                
-                gk = szList.at(ck);
-                for(vi=0; vi<nv[ck]; vi++){
-                    
-                    dx = x[NDIM * (gk + vi)] - cxi;
-                    dy = x[NDIM * (gk + vi) + 1] - cyi;
-                    if (pbc[0])
-                        dx -= L[0] * round(dx / L[0]);
-                    if (pbc[1])
-                        dy -= L[1] * round(dy / L[1]);
-                    distmp = sqrt(dx*dx + dy*dy);
-                    
-                    if(distmp<min_distance_1){
-                        min_distance_1 = distmp;
-                    }
-                }
-                
-                //k = min_k - 1
-                if (min_k == 0) {
-                    ck = sort_list[NC_contact];
-                }
-                else {
-                    ck = sort_list[min_k - 1];
-                }
-                
-                gk = szList.at(ck);
-                for(vi=0; vi<nv[ck]; vi++){
-                    
-                    dx = x[NDIM * (gk + vi)] - cxi;
-                    dy = x[NDIM * (gk + vi) + 1] - cyi;
-                    if (pbc[0])
-                        dx -= L[0] * round(dx / L[0]);
-                    if (pbc[1])
-                        dy -= L[1] * round(dy / L[1]);
-                    distmp = sqrt(dx*dx + dy*dy);
-                    
-                    if(distmp<min_distance_2){
-                        min_distance_2 = distmp;
-                    }
-                }
-                
-                if (min_distance_1 < min_distance_2) {
-                    k = min_k;
-                }
-                else {
-                    k = min_k - 1;
-                }
-                
-                
-                if (k == NC_contact) {
-                    psitmp = atan2(sin(sort_direction[k])+sin(sort_direction[0]),cos(sort_direction[k])+cos(sort_direction[0]));
-                }
-                else {
-                    psitmp = atan2(sin(sort_direction[k])+sin(sort_direction[k+1]),cos(sort_direction[k])+cos(sort_direction[k+1]));
-                }
-                
-                diff_psi = psi[ci] - psitmp;
-                diff_psi -= 2.0*PI*round(diff_psi/(2.0*PI));
-                psi[ci] -= diff_psi * dPsi;
-            }
-            // warning: do not change psi in this function if no adipocyte cells detected
-        }
-    }
+//give anti-friction based on ECM
+//void tumor2D::psiECM(){
+    //local variables
     
+    //loop over all tumor cells
     
-}
+//}
+
+
+
+
+
 
 //
 void tumor2D::crawlerUpdate(){
@@ -1364,13 +1093,16 @@ void tumor2D::crawlerUpdate(){
 			F[NDIM*gi] += v0tmp*ux;
 			F[NDIM*gi + 1] += v0tmp*uy;
 
+            //wpress[0] -=v0tmp*ux;
+            //wpress[1] -=v0tmp*uy;
 			// update global vertex
 			gi++;
 		}
 	}
 }
 
-//Adipocyte shrink under pressure
+//Adipocyte shrink under pressure: ballon
+
 void tumor2D::adipocyteShrink(){
     int ci, gi, vi;
     double atmp, a0tmp, da;
@@ -1378,11 +1110,11 @@ void tumor2D::adipocyteShrink(){
         atmp = area(ci);
         a0tmp = a0[ci];
         da = (atmp / a0tmp) - 1.0;
-        if (da < 0 && ka * da * da > 0.005) {
-            a0[ci] = atmp;
+        if (da < 0) {
+            a0[ci] = atmp-0.01;
             gi = szList.at(ci);
             for (vi = 0; vi < nv[ci]; vi++) {
-                l0.at(gi + vi) = l0.at(gi + vi) * sqrt(1+da);
+                l0.at(gi + vi) = l0.at(gi + vi) * sqrt(1+da-0.01);
                 r.at(gi + vi) = 0.5 * l0.at(gi + vi);
             }
         }
@@ -2156,7 +1888,7 @@ void tumor2D::repulsiveTumorInterfaceForces() {
 				F[NDIM*gi] += fx;
 
 				// update wall stresses
-				wpress[1] -= fx/L[1];
+				wpress[0] -= fx/L[1];
 			}
 
 			// cell index of gi
@@ -2318,10 +2050,12 @@ void tumor2D::repulsiveTumorInterfaceForces() {
 
 void tumor2D::stickyTumorInterfaceForces(){
 	// local variables
-	int ci, cj, gi, gj, vi, vj, bi, bj, pi, pj, boxid, sbtmp;
+	int ci, cj, gi, gj, gk, vi, vj, vk, bi, bj, pi, pj, boxid, sbtmp;
 	double sij, rij, dx, dy, rho0, xi, yi, ri;
-	double ftmp, fx, fy;
+	double ftmp, fx, fy, fxtmp, fytmp, F0 = v0, Ftangent, dpsi;
+    //miu is friction constand in the 1st method or preferred velocity in the 2nd method
 	vector<int> ztt(NVTOT,0);
+    vector<double> F_ij(tN * (NCELLS - tN) * NDIM,0);
 
 	// attraction shell parameters
 	double shellij, cutij, xij, kint = (kc*l1)/(l2 - l1);
@@ -2362,7 +2096,7 @@ void tumor2D::stickyTumorInterfaceForces(){
 				F[NDIM*gi] += fx;
 
 				// update wall stresses
-				wpress[1] -= fx/L[1];
+				wpress[0] -= fx/L[1];
 			}
 
 			// cell index of gi
@@ -2444,11 +2178,6 @@ void tumor2D::stickyTumorInterfaceForces(){
 							stress[1] 			+= dy*fy;
 							stress[2] 			+= 0.5*(dx*fy + dy*fx);
 
-						}
-                        
-                        
-                        //---------------------------------
-                        if (rij < rho0) {
                             // add to contacts
                             if (ci > cj)
                                 cij[NCELLS*cj + ci - (cj+1)*(cj+2)/2]++;
@@ -2460,10 +2189,15 @@ void tumor2D::stickyTumorInterfaceForces(){
                                 ztt[gi]++;
                                 ztt[gj]++;
                             }
-                        }
-                        //---------------------------------
+                            
+                            //if one is tumor and another is adipocyte
+                            if (ci < tN && cj >= tN){
+                                F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN)]     -= fx;
+                                F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN) + 1] -= fy;
+                            }
+                            
+						}
 
-                        
 					}
 				}
 
@@ -2553,10 +2287,6 @@ void tumor2D::stickyTumorInterfaceForces(){
 								stress[1] 			+= dy*fy;
 								stress[2] 			+= 0.5*(dx*fy + dy*fx);
                                 
-							}
-                            
-                            //---------------------------------
-                            if (rij < rho0) {
                                 // add to contacts
                                 if (ci > cj)
                                     cij[NCELLS*cj + ci - (cj+1)*(cj+2)/2]++;
@@ -2568,8 +2298,13 @@ void tumor2D::stickyTumorInterfaceForces(){
                                     ztt[gi]++;
                                     ztt[gj]++;
                                 }
-                            }
-                            //---------------------------------
+                                
+                                if (ci < tN && cj >= tN){
+                                    F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN)]     -= fx;
+                                    F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN) + 1] -= fy;
+                                }
+                                
+							}
 						}
 					}
 
@@ -2583,6 +2318,45 @@ void tumor2D::stickyTumorInterfaceForces(){
 		}
 	}
 
+    //update psi based on ECM
+    for (ci=0; ci<tN; ci++){
+        for (cj=tN; cj<NCELLS; cj++){
+
+            ftmp = sqrt(F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)] * F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)] + F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)+1] * F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)+1]);
+
+            if (ftmp > 0) {
+
+                //tangential direction
+                fxtmp = F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN) + 1]/ftmp;
+                fytmp = -F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)]/ftmp;
+                
+                //choose the initial side
+                Ftangent = cos(psi[ci]) * fxtmp + sin(psi[ci]) * fytmp;
+                if(Ftangent < 0){
+                    fxtmp = -fxtmp;
+                    fytmp = -fytmp;
+                    Ftangent = - Ftangent;
+                }
+
+                Ftangent = atan2(fytmp, fxtmp);
+                //distribute among vertexes
+                /*
+                gk = szList.at(ci);
+                for (vk = 0; vk < nv[ci]; vk++) {
+                    F[NDIM*(gk+vk)]             += fxtmp * F0/nv[ci]*5;
+                    F[NDIM*(gk+vk) + 1]         += fytmp * F0/nv[ci]*5;
+                }
+                 */
+                
+                dpsi = Ftangent - psi[ci];
+                dpsi -= 2.0*PI*round(dpsi/(2.0*PI));
+                psi[ci] += dpsi * 0.001;
+            }
+        }
+    }
+    
+    
+    
 	// normalize stress by box area, make dimensionless
 	stress[0] *= (rho0 / (L[0] * L[1]));
 	stress[1] *= (rho0 / (L[0] * L[1]));
@@ -2620,6 +2394,7 @@ void tumor2D::repulsiveTumorInterfaceForceUpdate() {
 
 void tumor2D::stickyTumorInterfaceForceUpdate() {
 	resetForcesAndEnergy();
+    crawlerUpdate();
 	stickyTumorInterfaceForces();
 	tumorShapeForces();
 	adipocyteECMAdhesionForces();
@@ -2938,7 +2713,7 @@ void tumor2D::invasion(tumor2DMemFn forceCall, double dDr, double dPsi, double D
     for (ci=0; ci<tN; ci++){
         psi[ci] = 2.0*PI*drand48();
     }
-    
+    psi[0] = 0;
 	// loop over time, have active brownian crawlers invade adipocytes
 	for (k=0; k<NT; k++){
 		// pbcs and reset forces
@@ -2953,19 +2728,19 @@ void tumor2D::invasion(tumor2DMemFn forceCall, double dDr, double dPsi, double D
 		}
         
         //adipocyte shrink response to pressure
-        adipocyteShrink();
+        //adipocyteShrink();
         
 		// update forces
 		CALL_MEMBER_FN(*this, forceCall)();
         
         //update psi
-        psiGap(dPsi);
+        //psiECM();
         
         // update psi based on persistence
         psiDiffusion();
         
 		// update active brownian crawler
-		crawlerUpdate();
+		//crawlerUpdate();
                 
 		// update positions (EULER UPDATE, OVERDAMPED)
         for (i=0; i<vertDOF; i++)
@@ -2982,7 +2757,7 @@ void tumor2D::invasion(tumor2DMemFn forceCall, double dDr, double dPsi, double D
 			cout << "===========================================" << endl;
 			cout << endl;
 			cout << "	** k 			= " << k << endl;
-			cout << "	** p 			= " << 0.5*(stress[0] + stress[1]) << endl;
+			cout << "	** p 			= " << wpress[0] << endl;
 			cout << "	** phi 			= " << vertexPackingFraction2D() << endl;
 
 			// print vertex positions to check placement
@@ -3030,32 +2805,34 @@ void tumor2D::invasionConstP(tumor2DMemFn forceCall, double dDr, double dPsi, do
 		}
         
         //adipocyte shrink response to pressure
-        adipocyteShrink();
+        if(k%1000==0){
+            adipocyteShrink();
+        }
 
 		// update forces
 		CALL_MEMBER_FN(*this, forceCall)();
 
         //update psi
-        psiGap(dPsi);
+        //psiECM();
         
         // update psi based on persistence
         psiDiffusion();
         
 		// update active brownian crawler
-		crawlerUpdate();
+		//crawlerUpdate();
 
 		// update positions (EULER UPDATE, OVERDAMPED)
 		for (i=0; i<vertDOF; i++)
 			x[i] += dt * F[i];
 
 		// update box lengths based on difference to fixed pressure
-		if (t > 100.0){
+		if (t > 1000.0){
 			Lold = L[0];
-			Lnew = Lold - 0.02*dt*(P0 - wpress[0])*L[1];
+			Lnew = Lold - 0.05*dt*(P0 - wpress[0])*L[1];
 			L[0] = Lnew;
 		}
-		else
-			P0 = (k*P0 + wpress[0])/(k+1);
+		else if (t>400)
+			P0 = ((k-20000)*P0 + wpress[0])/(k-20000+1);
 
 		
 		// affine transformation (move boundary from right)
@@ -3140,7 +2917,7 @@ void tumor2D::crawling(tumor2DMemFn forceCall, tumor2DMemFn psiCall, int NT, int
 			cout << "===========================================" << endl;
 			cout << endl;
 			cout << "	** k 			= " << k << endl;
-			cout << "	** p 			= " << 0.5*(stress[0] + stress[1]) << endl;
+			cout << "	** p 			= " << wpress[0] << endl;
 			cout << "	** phi 			= " << vertexPackingFraction2D() << endl;
 
 			// print vertex positions to check placement
@@ -3190,7 +2967,7 @@ void tumor2D::printTumorInterface(double t){
 
 	// print box sizes
 	posout << setw(w) << left << "BOXSZ";
-	posout << setw(wnum) << setprecision(pnum) << left << Lx;
+	posout << setw(wnum) << setprecision(pnum) << left << L[0];
 	posout << setw(wnum) << setprecision(pnum) << left << Ly;
 	posout << endl;
 
