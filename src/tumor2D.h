@@ -42,6 +42,7 @@ protected:
 	double kecm, ecmbreak;
 	std::vector<double> pinpos;
 	std::vector<bool> pinattach;
+    std::vector<bool> ifbroken;
 
 public:
 
@@ -74,7 +75,7 @@ public:
 	// biology functions
 	void psiDiffusion();
 	void psiVicsek();
-    void psiGap(double dPsi);
+    //void psiECM();
 	void crawlerUpdate();
     void adipocyteShrink();
 	void updateECMAttachments(bool attach);
