@@ -1110,11 +1110,12 @@ void tumor2D::adipocyteShrink(){
         atmp = area(ci);
         a0tmp = a0[ci];
         da = (atmp / a0tmp) - 1.0;
-        if (da < 0) {
-            a0[ci] = atmp-0.01;
+        //da < 0 && ka * da * da > 0.05
+        if (da < 0 && ka * da * da > 0.05) {
+            a0[ci] = atmp;
             gi = szList.at(ci);
             for (vi = 0; vi < nv[ci]; vi++) {
-                l0.at(gi + vi) = l0.at(gi + vi) * sqrt(1+da-0.01);
+                l0.at(gi + vi) = l0.at(gi + vi) * sqrt(1+da);
                 r.at(gi + vi) = 0.5 * l0.at(gi + vi);
             }
         }
@@ -2050,12 +2051,12 @@ void tumor2D::repulsiveTumorInterfaceForces() {
 
 void tumor2D::stickyTumorInterfaceForces(){
 	// local variables
-	int ci, cj, gi, gj, gk, vi, vj, vk, bi, bj, pi, pj, boxid, sbtmp;
+	int ci, cj, ck, cj_max, gi, gj, gk, vi, vj, vk, bi, bj, pi, pj, boxid, sbtmp;
 	double sij, rij, dx, dy, rho0, xi, yi, ri;
-	double ftmp, fx, fy, fxtmp, fytmp, F0 = v0, Ftangent, dpsi;
+	double ftmp, fx, fy, fxtmp, fytmp, Ftangent, dpsi, sign_teller, f_max;
     //miu is friction constand in the 1st method or preferred velocity in the 2nd method
 	vector<int> ztt(NVTOT,0);
-    vector<double> F_ij(tN * (NCELLS - tN) * NDIM,0);
+    vector<double> F_ij(tN * NCELLS * NDIM,0);
 
 	// attraction shell parameters
 	double shellij, cutij, xij, kint = (kc*l1)/(l2 - l1);
@@ -2190,10 +2191,16 @@ void tumor2D::stickyTumorInterfaceForces(){
                                 ztt[gj]++;
                             }
                             
-                            //if one is tumor and another is adipocyte
-                            if (ci < tN && cj >= tN){
-                                F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN)]     -= fx;
-                                F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN) + 1] -= fy;
+                            //if one is tumor and not attractive
+                            if (xij<1) {
+                                if (ci < tN){
+                                    F_ij[NDIM*(ci*NCELLS + cj)]     -= fx;
+                                    F_ij[NDIM*(ci*NCELLS + cj) + 1] -= fy;
+                                }
+                                if (cj < tN){
+                                    F_ij[NDIM*(cj*NCELLS + ci)]     += fx;
+                                    F_ij[NDIM*(cj*NCELLS + ci) + 1] += fy;
+                                }
                             }
                             
 						}
@@ -2299,9 +2306,17 @@ void tumor2D::stickyTumorInterfaceForces(){
                                     ztt[gj]++;
                                 }
                                 
-                                if (ci < tN && cj >= tN){
-                                    F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN)]     -= fx;
-                                    F_ij[NDIM*(ci*(NCELLS - tN) + cj-tN) + 1] -= fy;
+                                
+                                //if one is tumor and not attractive
+                                if (xij<1) {
+                                    if (ci < tN){
+                                        F_ij[NDIM*(ci*NCELLS + cj)]     -= fx;
+                                        F_ij[NDIM*(ci*NCELLS + cj) + 1] -= fy;
+                                    }
+                                    if (cj < tN){
+                                        F_ij[NDIM*(cj*NCELLS + ci)]     += fx;
+                                        F_ij[NDIM*(cj*NCELLS + ci) + 1] += fy;
+                                    }
                                 }
                                 
 							}
@@ -2320,39 +2335,48 @@ void tumor2D::stickyTumorInterfaceForces(){
 
     //update psi based on ECM
     for (ci=0; ci<tN; ci++){
+        
+        //find max pressure
+        cj_max = tN;
+        f_max = 0;
         for (cj=tN; cj<NCELLS; cj++){
-
-            ftmp = sqrt(F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)] * F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)] + F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)+1] * F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)+1]);
-
-            if (ftmp > 0) {
-
-                //tangential direction
-                fxtmp = F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN) + 1]/ftmp;
-                fytmp = -F_ij[NDIM*(ci*(NCELLS-tN)+cj-tN)]/ftmp;
-                
-                //choose the initial side
-                Ftangent = cos(psi[ci]) * fxtmp + sin(psi[ci]) * fytmp;
-                if(Ftangent < 0){
-                    fxtmp = -fxtmp;
-                    fytmp = -fytmp;
-                    Ftangent = - Ftangent;
+            if (F_ij[NDIM*(ci*NCELLS+cj)]!=0) {
+                ftmp = sqrt(F_ij[NDIM*(ci*NCELLS+cj)] * F_ij[NDIM*(ci*NCELLS+cj)] + F_ij[NDIM*(ci*NCELLS+cj)+1] * F_ij[NDIM*(ci*NCELLS+cj)+1]);
+                if (ftmp>f_max) {
+                    f_max = ftmp;
+                    cj_max = cj;
                 }
-
-                Ftangent = atan2(fytmp, fxtmp);
-                //distribute among vertexes
-                /*
-                gk = szList.at(ci);
-                for (vk = 0; vk < nv[ci]; vk++) {
-                    F[NDIM*(gk+vk)]             += fxtmp * F0/nv[ci]*5;
-                    F[NDIM*(gk+vk) + 1]         += fytmp * F0/nv[ci]*5;
-                }
-                 */
-                
-                dpsi = Ftangent - psi[ci];
-                dpsi -= 2.0*PI*round(dpsi/(2.0*PI));
-                psi[ci] += dpsi * 0.001;
             }
         }
+        
+        if (f_max > 0) {
+            //tangential direction
+            fxtmp = F_ij[NDIM*(ci*NCELLS+cj_max) + 1]/f_max;
+            fytmp = -F_ij[NDIM*(ci*NCELLS+cj_max)]/f_max;
+            
+            //choose the side with less pressure
+            sign_teller = 0;
+            for (ck=0; ck<tN; ck++){
+                if (ck!=ci) {
+                    if (F_ij[NDIM*(ci*NCELLS+ck)]!=0) {
+                        sign_teller += F_ij[NDIM*(ci*NCELLS+ck)] * fxtmp + F_ij[NDIM*(ci*NCELLS+ck) + 1] * fytmp;
+                    }
+                }
+            }
+            if (sign_teller < 0) {
+                fxtmp = -fxtmp;
+                fytmp = -fytmp;
+            }
+
+            
+            //compute angle
+            Ftangent = atan2(fytmp, fxtmp);
+            
+            dpsi = Ftangent - psi[ci];
+            dpsi -= 2.0*PI*round(dpsi/(2.0*PI));
+            psi[ci] += dpsi;
+        }
+        
     }
     
     
@@ -2362,13 +2386,15 @@ void tumor2D::stickyTumorInterfaceForces(){
 	stress[1] *= (rho0 / (L[0] * L[1]));
 	stress[2] *= (rho0 / (L[0] * L[1]));
 
-	// update l0 based on ztt 
+	// update l0 based on ztt
+    /*
 	for (gi=0; gi<NVTOT; gi++){
 		if (ztt[gi] == 0 && ztt[ip1[gi]] == 0)
 			l0[gi] = l0_init[gi]*(1.0 - (gamtt/kl));
 		else
 			l0[gi] = l0_init[gi];
 	}
+     */
 }
 
 
@@ -2805,9 +2831,7 @@ void tumor2D::invasionConstP(tumor2DMemFn forceCall, double dDr, double dPsi, do
 		}
         
         //adipocyte shrink response to pressure
-        if(k%1000==0){
-            adipocyteShrink();
-        }
+        adipocyteShrink();
 
 		// update forces
 		CALL_MEMBER_FN(*this, forceCall)();
